@@ -141,8 +141,24 @@
 }
 
 .cvf-variant-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     margin-bottom: 5px;
     font-weight: 700;
+}
+
+.cvf-variant-title > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.cvf-chat-count {
+    flex: 0 0 auto;
+    color: var(--SmartThemeEmColor);
+    font-size: 0.85em;
+    font-weight: 400;
 }
 
 .cvf-version {

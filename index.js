@@ -2,6 +2,7 @@ import {
     characters,
     eventSource,
     event_types,
+    getRequestHeaders,
     getThumbnailUrl,
     saveSettingsDebounced,
     selectCharacterById,
@@ -12,6 +13,7 @@ import { Popup } from '../../../popup.js';
 const MODULE_KEY = 'characterVariantFolders';
 const ROOT_ID = 'cvf-root';
 const BUTTON_ID = 'cvf-toggle';
+const chatCountCache = new Map();
 
 const defaults = {
     enabled: true,
@@ -38,6 +40,26 @@ function creatorNotes(character) {
 
 function characterName(character) {
     return String(character?.data?.name ?? character?.name ?? 'Без имени').trim();
+}
+
+async function getChatCount(character) {
+    const key = characterKey(character);
+    if (!chatCountCache.has(key)) {
+        const request = fetch('/api/characters/chats', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ avatar_url: character.avatar }),
+        }).then(async response => {
+            if (!response.ok) throw new Error(`Failed to load chat count: ${response.status}`);
+            return Object.values(await response.json()).length;
+        }).catch(error => {
+            chatCountCache.delete(key);
+            console.warn('[Character Variant Folders] Could not load chat count', error);
+            return null;
+        });
+        chatCountCache.set(key, request);
+    }
+    return chatCountCache.get(key);
 }
 
 function automaticFolderName(name) {
@@ -124,16 +146,28 @@ function makeVariant(item, managing) {
 
     const title = document.createElement('div');
     title.className = 'cvf-variant-title';
-    title.textContent = characterName(item.character);
-    body.append(title);
+    const name = document.createElement('span');
+    name.textContent = characterName(item.character);
+    title.append(name);
 
     const version = item.character?.data?.character_version;
     if (version) {
         const badge = document.createElement('span');
         badge.className = 'cvf-version';
         badge.textContent = `v${version}`;
-        title.append(' ', badge);
+        name.append(' ', badge);
     }
+
+    const chatCount = document.createElement('span');
+    chatCount.className = 'cvf-chat-count';
+    chatCount.title = 'Количество чатов с персонажем';
+    chatCount.innerHTML = '<i class="fa-solid fa-comments"></i> …';
+    getChatCount(item.character).then(count => {
+        if (count === null || !chatCount.isConnected) return;
+        chatCount.lastChild.textContent = ` ${count}`;
+    });
+    title.append(chatCount);
+    body.append(title);
 
     const notes = document.createElement('div');
     notes.className = creatorNotes(item.character) ? 'cvf-notes' : 'cvf-notes cvf-notes-empty';
@@ -298,6 +332,11 @@ function toggle() {
     render(true);
 }
 
+function refreshChatCounts() {
+    chatCountCache.clear();
+    render();
+}
+
 function mount() {
     if (!document.getElementById(BUTTON_ID)) {
         const button = document.createElement('div');
@@ -323,6 +362,8 @@ export function init() {
     eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => render());
     eventSource.on(event_types.CHARACTER_EDITED, () => render());
     eventSource.on(event_types.CHARACTER_DELETED, () => render());
+    eventSource.on(event_types.CHAT_CREATED, refreshChatCounts);
+    eventSource.on(event_types.CHAT_DELETED, refreshChatCounts);
 }
 
 jQuery(() => init());
