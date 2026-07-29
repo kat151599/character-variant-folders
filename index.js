@@ -4,6 +4,7 @@ import {
     event_types,
     getThumbnailUrl,
     saveSettingsDebounced,
+    selectCharacterById,
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { Popup } from '../../../popup.js';
@@ -108,9 +109,8 @@ function folderOptions(selected = '') {
     return fragment;
 }
 
-function openCharacter(chid) {
-    const nativeCard = document.querySelector(`#rm_print_characters_block .character_select[chid="${chid}"]`);
-    if (nativeCard instanceof HTMLElement) nativeCard.click();
+async function openCharacter(chid) {
+    await selectCharacterById(chid);
 }
 
 function makeVariant(item, managing) {
@@ -156,8 +156,8 @@ function makeVariant(item, managing) {
     }
 
     card.append(body);
-    card.addEventListener('click', () => {
-        if (!managing) openCharacter(item.chid);
+    card.addEventListener('click', async () => {
+        if (!managing) await openCharacter(item.chid);
     });
     return card;
 }
