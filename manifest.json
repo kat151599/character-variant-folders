@@ -1,0 +1,15 @@
+{
+    "display_name": "Character Variant Folders",
+    "loading_order": 50,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "kat151599",
+    "version": "1.0.0",
+    "homePage": "https://github.com/kat151599/character-variant-folders",
+    "auto_update": true,
+    "hooks": {
+        "activate": "init"
+    }
+}
