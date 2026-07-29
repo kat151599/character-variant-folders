@@ -13,7 +13,7 @@ const ROOT_ID = 'cvf-root';
 const BUTTON_ID = 'cvf-toggle';
 
 const defaults = {
-    enabled: false,
+    enabled: true,
     assignments: {},
     folders: [],
     collapsed: {},
@@ -165,7 +165,7 @@ function makeVariant(item, managing) {
 function makeFolder(group, managing) {
     const section = document.createElement('section');
     section.className = 'cvf-folder';
-    const collapsed = settings().collapsed[group.name] ?? false;
+    const collapsed = settings().collapsed[group.name] ?? true;
     section.classList.toggle('cvf-collapsed', collapsed);
 
     const header = document.createElement('button');
@@ -324,3 +324,5 @@ export function init() {
     eventSource.on(event_types.CHARACTER_EDITED, () => render());
     eventSource.on(event_types.CHARACTER_DELETED, () => render());
 }
+
+jQuery(() => init());

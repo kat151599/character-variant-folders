@@ -6,10 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "kat151599",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homePage": "https://github.com/kat151599/character-variant-folders",
-    "auto_update": true,
-    "hooks": {
-        "activate": "init"
-    }
+    "auto_update": true
 }
