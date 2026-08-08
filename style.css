@@ -79,6 +79,12 @@
     color: var(--SmartThemeQuoteColor);
 }
 
+.cvf-folder-avatars .fa-users {
+    margin-left: 12px;
+    font-size: 27px;
+    color: var(--SmartThemeQuoteColor);
+}
+
 .cvf-folder-label {
     min-width: 0;
     display: flex;
@@ -193,6 +199,55 @@
     padding: 20px 10px;
     color: var(--SmartThemeEmColor);
     text-align: center;
+}
+
+.cvf-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 12px 2px 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.cvf-groups-section {
+    margin-bottom: 14px;
+}
+
+.cvf-group-folder .cvf-group-folder {
+    margin-left: 14px;
+    border-left-width: 3px;
+}
+
+.cvf-group-card-avatars {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, 30px);
+    grid-template-rows: repeat(2, 38px);
+    place-items: center;
+    width: 64px;
+    min-height: 76px;
+    overflow: hidden;
+    border-radius: 6px;
+    color: var(--SmartThemeQuoteColor);
+    background: var(--black30a);
+}
+
+.cvf-group-card-avatars img {
+    width: 30px;
+    height: 38px;
+    object-fit: cover;
+}
+
+.cvf-group-card-avatars > i {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    font-size: 28px;
+}
+
+.cvf-add-subfolder {
+    margin: 6px;
 }
 
 .cvf-search-hidden {

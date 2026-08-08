@@ -9,6 +9,7 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { Popup } from '../../../popup.js';
+import { groups as sillyTavernGroups, openGroupById } from '../../../group-chats.js';
 
 const MODULE_KEY = 'characterVariantFolders';
 const ROOT_ID = 'cvf-root';
@@ -20,6 +21,8 @@ const defaults = {
     assignments: {},
     folders: [],
     collapsed: {},
+    groupFolders: [],
+    groupAssignments: {},
 };
 
 function settings() {
@@ -27,7 +30,35 @@ function settings() {
     extension_settings[MODULE_KEY].assignments ??= {};
     extension_settings[MODULE_KEY].folders ??= [];
     extension_settings[MODULE_KEY].collapsed ??= {};
+    extension_settings[MODULE_KEY].groupFolders ??= [];
+    extension_settings[MODULE_KEY].groupAssignments ??= {};
     return extension_settings[MODULE_KEY];
+}
+
+function groupKey(group) {
+    return String(group?.id ?? '');
+}
+
+function normalizeFolderPath(value) {
+    return String(value ?? '').split(/[\\/]+/u).map(part => part.trim()).filter(Boolean).join('/');
+}
+
+function memberCharacter(member) {
+    return characters.find(character => character.avatar === member || character.name === member || character?.data?.name === member);
+}
+
+function groupMembers(group) {
+    return (Array.isArray(group?.members) ? group.members : []).map(memberCharacter).filter(Boolean);
+}
+
+function groupSignature(group) {
+    return (Array.isArray(group?.members) ? group.members : [])
+        .map(member => String(member).toLocaleLowerCase()).sort().join('\u0000');
+}
+
+function sameMembersFolderName(group) {
+    const names = groupMembers(group).map(characterName);
+    return names.length ? names.join(' + ') : 'Группы без персонажей';
 }
 
 function characterKey(character) {
@@ -245,6 +276,169 @@ function makeFolder(group, managing) {
     return section;
 }
 
+function groupFolderOptions(selected = '') {
+    const fragment = document.createDocumentFragment();
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'Без папки (автогруппировка)';
+    fragment.append(empty);
+    for (const path of settings().groupFolders) {
+        const option = document.createElement('option');
+        option.value = path;
+        option.textContent = path.split('/').map((part, index) => `${index ? '↳ ' : ''}${part}`).join(' / ');
+        option.selected = path === selected;
+        fragment.append(option);
+    }
+    return fragment;
+}
+
+function makeGroupCard(group, managing) {
+    const card = document.createElement('article');
+    card.className = 'cvf-variant cvf-group-card';
+    const avatars = document.createElement('div');
+    avatars.className = 'cvf-group-card-avatars';
+    const members = groupMembers(group);
+    members.slice(0, 4).forEach(character => avatars.append(makeAvatar({ character })));
+    if (!members.length) avatars.innerHTML = '<i class="fa-solid fa-user-group"></i>';
+
+    const body = document.createElement('div');
+    body.className = 'cvf-variant-body';
+    const title = document.createElement('div');
+    title.className = 'cvf-variant-title';
+    const name = document.createElement('span');
+    name.textContent = group.name || 'Группа без имени';
+    const count = document.createElement('span');
+    count.className = 'cvf-chat-count';
+    count.innerHTML = `<i class="fa-solid fa-users"></i> ${members.length}`;
+    title.append(name, count);
+    body.append(title);
+
+    const memberNames = document.createElement('div');
+    memberNames.className = 'cvf-notes';
+    memberNames.textContent = members.map(characterName).join(', ') || 'Нет доступных персонажей';
+    body.append(memberNames);
+
+    if (managing) {
+        const select = document.createElement('select');
+        select.className = 'text_pole cvf-folder-select';
+        const key = groupKey(group);
+        select.append(groupFolderOptions(settings().groupAssignments[key]));
+        select.addEventListener('click', event => event.stopPropagation());
+        select.addEventListener('change', () => {
+            if (select.value) settings().groupAssignments[key] = select.value;
+            else delete settings().groupAssignments[key];
+            saveSettingsDebounced();
+            render(true);
+        });
+        body.append(select);
+    }
+
+    card.append(avatars, body);
+    card.addEventListener('click', async () => {
+        if (!managing) await openGroupById(group.id);
+    });
+    return card;
+}
+
+function makeGroupTree() {
+    const root = { name: '', path: '', children: new Map(), groups: [], automatic: false };
+    const addFolder = (path, automatic = false) => {
+        let node = root;
+        let current = '';
+        for (const part of normalizeFolderPath(path).split('/').filter(Boolean)) {
+            current = current ? `${current}/${part}` : part;
+            if (!node.children.has(part)) node.children.set(part, { name: part, path: current, children: new Map(), groups: [], automatic });
+            node = node.children.get(part);
+            node.automatic &&= automatic;
+        }
+        return node;
+    };
+    settings().groupFolders.forEach(path => addFolder(path));
+
+    const bySignature = new Map();
+    for (const group of sillyTavernGroups) {
+        const assigned = normalizeFolderPath(settings().groupAssignments[groupKey(group)]);
+        if (assigned && settings().groupFolders.includes(assigned)) addFolder(assigned).groups.push(group);
+        else {
+            const signature = groupSignature(group);
+            if (!bySignature.has(signature)) bySignature.set(signature, []);
+            bySignature.get(signature).push(group);
+        }
+    }
+    for (const sameMembers of bySignature.values()) {
+        if (sameMembers.length > 1) addFolder(sameMembersFolderName(sameMembers[0]), true).groups.push(...sameMembers);
+        else root.groups.push(...sameMembers);
+    }
+    return root;
+}
+
+function makeGroupFolderNode(node, managing) {
+    const section = document.createElement('section');
+    section.className = 'cvf-folder cvf-group-folder';
+    const collapseKey = `groups/${node.path}`;
+    section.classList.toggle('cvf-collapsed', settings().collapsed[collapseKey] ?? true);
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'cvf-folder-header';
+    header.innerHTML = `<span class="cvf-folder-avatars"><i class="fa-solid ${node.automatic ? 'fa-users' : 'fa-folder'}"></i></span><span class="cvf-folder-label"><strong></strong><small>${node.groups.length} групп${node.automatic ? ' · одинаковый состав' : ''}</small></span><i class="fa-solid fa-chevron-down cvf-chevron"></i>`;
+    header.querySelector('strong').textContent = node.name;
+    header.addEventListener('click', () => {
+        settings().collapsed[collapseKey] = section.classList.toggle('cvf-collapsed');
+        saveSettingsDebounced();
+    });
+    const contents = document.createElement('div');
+    contents.className = 'cvf-folder-contents';
+    [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(child => contents.append(makeGroupFolderNode(child, managing)));
+    node.groups.sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(group => contents.append(makeGroupCard(group, managing)));
+    if (managing && !node.automatic) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'menu_button cvf-add-subfolder';
+        add.innerHTML = '<i class="fa-solid fa-folder-plus"></i> Добавить подпапку';
+        add.addEventListener('click', event => { event.stopPropagation(); createGroupFolder(node.path); });
+        contents.append(add);
+    }
+    section.append(header, contents);
+    return section;
+}
+
+function makeGroupsSection(managing) {
+    const section = document.createElement('section');
+    section.className = 'cvf-groups-section';
+    const heading = document.createElement('div');
+    heading.className = 'cvf-section-heading';
+    heading.innerHTML = '<strong><i class="fa-solid fa-user-group"></i> Группы</strong>';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'menu_button fa-solid fa-folder-plus';
+    add.title = 'Создать папку для групп';
+    add.addEventListener('click', () => createGroupFolder(''));
+    heading.append(add);
+    section.append(heading);
+    const tree = makeGroupTree();
+    [...tree.children.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(node => section.append(makeGroupFolderNode(node, managing)));
+    tree.groups.sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(group => section.append(makeGroupCard(group, managing)));
+    if (!sillyTavernGroups.length) {
+        const empty = document.createElement('div');
+        empty.className = 'cvf-empty';
+        empty.textContent = 'Группы не найдены';
+        section.append(empty);
+    }
+    return section;
+}
+
+async function createGroupFolder(parentPath = '') {
+    const value = await Popup.show.input('Новая папка групп', parentPath ? `Подпапка в «${parentPath}»:` : 'Название папки (можно указать путь через /):', '');
+    const child = normalizeFolderPath(value);
+    if (!child) return;
+    const path = normalizeFolderPath(parentPath ? `${parentPath}/${child}` : child);
+    const paths = path.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+    for (const item of paths) if (!settings().groupFolders.some(x => x.toLocaleLowerCase() === item.toLocaleLowerCase())) settings().groupFolders.push(item);
+    settings().groupFolders.sort((a, b) => a.localeCompare(b));
+    saveSettingsDebounced();
+    render(true);
+}
+
 async function createFolder() {
     const value = await Popup.show.input('Новая папка персонажа', 'Введите название папки для вариаций:', '');
     const name = typeof value === 'string' ? value.trim() : '';
@@ -289,7 +483,7 @@ function makeToolbar(managing, setManaging) {
 
 function applySearch(query) {
     const normalized = query.trim().toLocaleLowerCase();
-    document.querySelectorAll(`#${ROOT_ID} .cvf-folder, #${ROOT_ID} > .cvf-variant`).forEach(element => {
+    document.querySelectorAll(`#${ROOT_ID} .cvf-folder, #${ROOT_ID} .cvf-variant`).forEach(element => {
         const matches = !normalized || element.textContent.toLocaleLowerCase().includes(normalized);
         element.classList.toggle('cvf-search-hidden', !matches);
     });
@@ -314,6 +508,11 @@ function render(force = false) {
         managing = value;
         render(true);
     }));
+    root.append(makeGroupsSection(managing));
+    const characterHeading = document.createElement('div');
+    characterHeading.className = 'cvf-section-heading';
+    characterHeading.innerHTML = '<strong><i class="fa-solid fa-user"></i> Персонажи</strong>';
+    root.append(characterHeading);
     const { groups, loose } = buildGroups();
     groups.forEach(group => root.append(makeFolder(group, managing)));
     loose.forEach(item => root.append(makeVariant(item, managing)));
@@ -362,6 +561,7 @@ export function init() {
     eventSource.on(event_types.CHARACTER_PAGE_LOADED, () => render());
     eventSource.on(event_types.CHARACTER_EDITED, () => render());
     eventSource.on(event_types.CHARACTER_DELETED, () => render());
+    eventSource.on(event_types.GROUP_UPDATED, () => render());
     eventSource.on(event_types.CHAT_CREATED, refreshChatCounts);
     eventSource.on(event_types.CHAT_DELETED, refreshChatCounts);
 }
