@@ -23,6 +23,7 @@ const defaults = {
     collapsed: {},
     groupFolders: [],
     groupAssignments: {},
+    sortMode: 'date-desc',
 };
 
 function settings() {
@@ -71,6 +72,46 @@ function creatorNotes(character) {
 
 function characterName(character) {
     return String(character?.data?.name ?? character?.name ?? 'Без имени').trim();
+}
+
+function itemDate(value) {
+    const candidates = [value?.date_added, value?.create_date, value?.date_last_chat, value?.id];
+    for (const candidate of candidates) {
+        const timestamp = typeof candidate === 'number' ? candidate : Date.parse(candidate);
+        if (Number.isFinite(timestamp)) return timestamp;
+    }
+    return 0;
+}
+
+function lastUseDate(value) {
+    const candidates = [value?.date_last_chat, value?.last_chat_date, value?.date_added, value?.create_date, value?.id];
+    for (const candidate of candidates) {
+        const timestamp = typeof candidate === 'number' ? candidate : Date.parse(candidate);
+        if (Number.isFinite(timestamp)) return timestamp;
+    }
+    return 0;
+}
+
+function compareNamedDated(a, b, getName, getDate) {
+    const [field, order] = settings().sortMode.split('-');
+    const direction = order === 'desc' ? -1 : 1;
+    if (field === 'date') {
+        const difference = getDate(a) - getDate(b);
+        if (difference) return difference * direction;
+    }
+    return getName(a).localeCompare(getName(b), undefined, { sensitivity: 'base', numeric: true }) * direction;
+}
+
+function compareCharacterItems(a, b) {
+    return compareNamedDated(a, b, item => characterName(item.character), item => lastUseDate(item.character));
+}
+
+function compareGroups(a, b) {
+    return compareNamedDated(a, b, group => String(group?.name || 'Группа без имени'), lastUseDate);
+}
+
+function newestCharacterDate(items) {
+    return Math.max(0, ...items.map(item => lastUseDate(item.character)));
 }
 
 async function getChatCount(character) {
@@ -132,8 +173,9 @@ function buildGroups() {
         }
     }
 
-    groups.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    loose.sort((a, b) => characterName(a.character).localeCompare(characterName(b.character)));
+    groups.forEach(group => group.items.sort(compareCharacterItems));
+    groups.sort((a, b) => compareNamedDated(a, b, group => group.name, group => newestCharacterDate(group.items)));
+    loose.sort(compareCharacterItems);
     return { groups, loose };
 }
 
@@ -372,6 +414,14 @@ function makeGroupTree() {
     return root;
 }
 
+function newestGroupNodeDate(node) {
+    return Math.max(0, ...node.groups.map(lastUseDate), ...[...node.children.values()].map(newestGroupNodeDate));
+}
+
+function compareGroupNodes(a, b) {
+    return compareNamedDated(a, b, node => node.name, newestGroupNodeDate);
+}
+
 function makeGroupFolderNode(node, managing) {
     const section = document.createElement('section');
     section.className = 'cvf-folder cvf-group-folder';
@@ -388,8 +438,8 @@ function makeGroupFolderNode(node, managing) {
     });
     const contents = document.createElement('div');
     contents.className = 'cvf-folder-contents';
-    [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(child => contents.append(makeGroupFolderNode(child, managing)));
-    node.groups.sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(group => contents.append(makeGroupCard(group, managing)));
+    [...node.children.values()].sort(compareGroupNodes).forEach(child => contents.append(makeGroupFolderNode(child, managing)));
+    node.groups.sort(compareGroups).forEach(group => contents.append(makeGroupCard(group, managing)));
     if (managing && !node.automatic) {
         const add = document.createElement('button');
         add.type = 'button';
@@ -405,25 +455,48 @@ function makeGroupFolderNode(node, managing) {
 function makeGroupsSection(managing) {
     const section = document.createElement('section');
     section.className = 'cvf-groups-section';
+    section.classList.toggle('cvf-section-collapsed', settings().collapsed.groupsSection ?? false);
     const heading = document.createElement('div');
     heading.className = 'cvf-section-heading';
-    heading.innerHTML = '<strong><i class="fa-solid fa-user-group"></i> Группы</strong>';
+    heading.tabIndex = 0;
+    heading.setAttribute('role', 'button');
+    heading.setAttribute('aria-expanded', String(!section.classList.contains('cvf-section-collapsed')));
+    heading.innerHTML = '<strong><i class="fa-solid fa-user-group"></i> Группы</strong><i class="fa-solid fa-chevron-down cvf-section-chevron"></i>';
+    const toggleSection = () => {
+        const collapsed = section.classList.toggle('cvf-section-collapsed');
+        settings().collapsed.groupsSection = collapsed;
+        heading.setAttribute('aria-expanded', String(!collapsed));
+        saveSettingsDebounced();
+    };
+    heading.addEventListener('click', toggleSection);
+    heading.addEventListener('keydown', event => {
+        if (event.target === heading && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            toggleSection();
+        }
+    });
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'menu_button fa-solid fa-folder-plus';
     add.title = 'Создать папку для групп';
-    add.addEventListener('click', () => createGroupFolder(''));
+    add.addEventListener('click', event => {
+        event.stopPropagation();
+        createGroupFolder('');
+    });
     heading.append(add);
     section.append(heading);
+    const contents = document.createElement('div');
+    contents.className = 'cvf-groups-contents';
     const tree = makeGroupTree();
-    [...tree.children.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(node => section.append(makeGroupFolderNode(node, managing)));
-    tree.groups.sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(group => section.append(makeGroupCard(group, managing)));
+    [...tree.children.values()].sort(compareGroupNodes).forEach(node => contents.append(makeGroupFolderNode(node, managing)));
+    tree.groups.sort(compareGroups).forEach(group => contents.append(makeGroupCard(group, managing)));
     if (!sillyTavernGroups.length) {
         const empty = document.createElement('div');
         empty.className = 'cvf-empty';
         empty.textContent = 'Группы не найдены';
-        section.append(empty);
+        contents.append(empty);
     }
+    section.append(contents);
     return section;
 }
 
@@ -466,6 +539,27 @@ function makeToolbar(managing, setManaging) {
     search.placeholder = 'Поиск по папкам, именам и заметкам…';
     search.addEventListener('input', () => applySearch(search.value));
 
+    const sort = document.createElement('select');
+    sort.className = 'text_pole cvf-sort';
+    sort.title = 'Сортировка';
+    for (const [value, label] of [
+        ['name-asc', 'Имя: А → Я'],
+        ['name-desc', 'Имя: Я → А'],
+        ['date-desc', 'Последнее использование'],
+        ['date-asc', 'Первое использование'],
+    ]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        option.selected = settings().sortMode === value;
+        sort.append(option);
+    }
+    sort.addEventListener('change', () => {
+        settings().sortMode = sort.value;
+        saveSettingsDebounced();
+        render(true);
+    });
+
     const manage = document.createElement('button');
     manage.type = 'button';
     manage.className = `menu_button fa-solid ${managing ? 'fa-check' : 'fa-folder-tree'}`;
@@ -477,7 +571,7 @@ function makeToolbar(managing, setManaging) {
     add.className = 'menu_button fa-solid fa-folder-plus';
     add.title = 'Создать папку';
     add.addEventListener('click', createFolder);
-    toolbar.append(title, search, manage, add);
+    toolbar.append(title, search, sort, manage, add);
     return toolbar;
 }
 
